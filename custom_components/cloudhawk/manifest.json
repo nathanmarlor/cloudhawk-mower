@@ -1,0 +1,18 @@
+{
+  "domain": "cloudhawk",
+  "name": "CloudHawk Lawn Mower",
+  "documentation": "https://github.com/nathanmarlor/cloudhawk-mower",
+  "issue_tracker": "https://github.com/nathanmarlor/cloudhawk-mower/issues",
+  "codeowners": ["@nathanmarlor"],
+  "requirements": ["bleak>=0.20.0"],
+  "version": "1.0.0",
+  "config_flow": true,
+  "bluetooth": [
+    {
+      "service_uuid": "0000ff12-0000-1000-8000-00805f9b34fb",
+      "connectable": true
+    }
+  ],
+  "iot_class": "local_polling",
+  "integration_type": "device"
+}

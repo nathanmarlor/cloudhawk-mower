@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "CloudHawk Lawn Mower",
+        "description": "Enter your mower's Bluetooth address",
+        "data": {
+          "address": "Bluetooth Address (MAC)",
+          "name": "Device Name"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "CloudHawk Lawn Mower",
+        "description": "Confirm setup of {name}"
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the mower. Make sure it's powered on and within range.",
+      "unknown": "Unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This mower is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "CloudHawk Options",
+        "data": {
+          "scan_interval": "Update interval (seconds)"
+        }
+      }
+    }
+  }
+}

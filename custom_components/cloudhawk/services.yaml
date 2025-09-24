@@ -1,0 +1,27 @@
+start:
+  name: Start Mowing
+  description: Start regular mowing cycle
+  target:
+    device:
+      integration: cloudhawk
+
+start_once:
+  name: Start Mowing Once
+  description: Start a single mowing session
+  target:
+    device:
+      integration: cloudhawk
+
+stop:
+  name: Stop Mowing
+  description: Stop the mower immediately
+  target:
+    device:
+      integration: cloudhawk
+
+dock:
+  name: Return to Dock
+  description: Send the mower back to its charging dock
+  target:
+    device:
+      integration: cloudhawk

@@ -1,0 +1,105 @@
+# Example Home Assistant Dashboard Configuration for CloudHawk Mower
+# Add this to your Lovelace dashboard
+
+title: CloudHawk Mower Control
+path: cloudhawk-mower
+icon: mdi:robot-mower
+cards:
+  - type: vertical-stack
+    cards:
+      # Mower Status Card
+      - type: entities
+        title: Mower Status
+        entities:
+          - entity: sensor.cloudhawk_mower_status
+          - entity: sensor.cloudhawk_mower_battery_level
+            secondary_info: last-updated
+          - entity: sensor.cloudhawk_mower_signal_type
+          - entity: switch.cloudhawk_mower_boundary_trimming
+            tap_action:
+              action: none  # Read-only for now
+          - entity: switch.cloudhawk_mower_ultrasonic_sensor
+            tap_action:
+              action: none  # Read-only for now
+          - entity: sensor.cloudhawk_mower_working_hours
+          - entity: sensor.cloudhawk_mower_fault_records
+        show_header_toggle: false
+
+      # Control Buttons
+      - type: horizontal-stack
+        cards:
+          - type: button
+            entity: button.cloudhawk_mower_start_mowing
+            name: Mow Now
+            icon: mdi:play
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.cloudhawk_mower_start_mowing
+            hold_action:
+              action: more-info
+              
+          - type: button
+            entity: button.cloudhawk_mower_spiral_cut
+            name: Spiral
+            icon: mdi:spiral
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.cloudhawk_mower_spiral_cut
+            hold_action:
+              action: more-info
+              
+          - type: button
+            entity: button.cloudhawk_mower_edge_cut
+            name: Edge
+            icon: mdi:square-outline
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.cloudhawk_mower_edge_cut
+            hold_action:
+              action: more-info
+
+          - type: button
+            entity: button.cloudhawk_mower_stop_mowing
+            name: Stop
+            icon: mdi:stop
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.cloudhawk_mower_stop_mowing
+            hold_action:
+              action: more-info
+
+          - type: button
+            entity: button.cloudhawk_mower_return_to_dock
+            name: Dock
+            icon: mdi:home
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.cloudhawk_mower_return_to_dock
+            hold_action:
+              action: more-info
+
+      # Technical Info
+      - type: entities
+        title: Technical Information
+        entities:
+          - entity: sensor.cloudhawk_mower_firmware_version
+          - entity: sensor.cloudhawk_mower_serial_number
+        show_header_toggle: false
+
+      # Battery Chart (if you have history enabled)
+      - type: history-graph
+        title: Battery Level History
+        entities:
+          - entity: sensor.cloudhawk_mower_battery_level
+        hours_to_show: 24
+        refresh_interval: 60

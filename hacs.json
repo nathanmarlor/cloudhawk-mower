@@ -1,0 +1,7 @@
+{
+  "name": "CloudHawk Lawn Mower",
+  "content_in_root": false,
+  "render_readme": true,
+  "domains": ["cloudhawk"],
+  "homeassistant": "2023.8.0"
+}

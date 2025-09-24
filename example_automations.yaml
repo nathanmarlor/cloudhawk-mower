@@ -1,0 +1,182 @@
+# Example Home Assistant Automations for CloudHawk Mower
+# Add these to your automations.yaml or through the UI
+
+# Start mowing on weekdays at 9 AM (when battery is good)
+- alias: "CloudHawk: Start Weekday Mowing"
+  description: "Start mowing on weekdays if battery is sufficient"
+  trigger:
+    platform: time
+    at: "09:00:00"
+  condition:
+    - condition: time
+      weekday:
+        - mon
+        - tue
+        - wed
+        - thu
+        - fri
+    - condition: numeric_state
+      entity_id: sensor.cloudhawk_mower_battery_level
+      above: 30
+    - condition: state
+      entity_id: weather.home  # Replace with your weather entity
+      state: 
+        - sunny
+        - cloudy
+        - partlycloudy
+  action:
+    - service: button.press
+      target:
+        entity_id: button.cloudhawk_mower_start_mowing
+    - service: notify.mobile_app_your_phone  # Replace with your notification service
+      data:
+        title: "🌱 Mower Started"
+        message: "CloudHawk mower started weekly mowing session"
+
+# Return to dock when battery is low
+- alias: "CloudHawk: Low Battery Dock"
+  description: "Send mower home when battery is low"
+  trigger:
+    platform: numeric_state
+    entity_id: sensor.cloudhawk_mower_battery_level
+    below: 20
+  condition:
+    # Only if mower is not already charging
+    - condition: state
+      entity_id: sensor.cloudhawk_mower_battery_level
+      attribute: charging
+      state: false
+  action:
+    - service: button.press
+      target:
+        entity_id: button.cloudhawk_mower_return_to_dock
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "🔋 Mower Low Battery"
+        message: "CloudHawk mower returning to dock ({{ states('sensor.cloudhawk_mower_battery_level') }}% battery)"
+
+# Stop mowing when it starts raining
+- alias: "CloudHawk: Stop on Rain"
+  description: "Stop mowing when rain is detected"
+  trigger:
+    - platform: state
+      entity_id: weather.home  # Replace with your weather entity
+      to: rainy
+    - platform: state
+      entity_id: binary_sensor.rain_sensor  # If you have a rain sensor
+      to: "on"
+  action:
+    - service: button.press
+      target:
+        entity_id: button.cloudhawk_mower_return_to_dock
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "🌧️ Mower Stopped"
+        message: "CloudHawk mower returning to dock due to rain"
+
+# Alert when fault records increase
+- alias: "CloudHawk: Fault Alert"
+  description: "Alert when new faults are detected"
+  trigger:
+    platform: state
+    entity_id: sensor.cloudhawk_mower_fault_records
+  condition:
+    - condition: template
+      value_template: "{{ trigger.to_state.state | int > trigger.from_state.state | int }}"
+  action:
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "⚠️ Mower Fault"
+        message: >
+          CloudHawk mower has {{ trigger.to_state.state }} fault records.
+          Recent faults: {{ state_attr('sensor.cloudhawk_mower_fault_records', 'recent_faults') | join(', ') }}
+        data:
+          priority: high
+          tag: mower_fault
+
+# Weekly maintenance reminder
+- alias: "CloudHawk: Maintenance Reminder"
+  description: "Weekly maintenance reminder based on working hours"
+  trigger:
+    platform: time
+    at: "18:00:00"
+  condition:
+    - condition: time
+      weekday:
+        - sun
+    - condition: template
+      value_template: "{{ (states('sensor.cloudhawk_mower_working_hours') | float) % 10 < 1 }}"  # Every ~10 hours
+  action:
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "🔧 Mower Maintenance"
+        message: >
+          CloudHawk mower has {{ states('sensor.cloudhawk_mower_working_hours') }} working hours.
+          Consider checking blades and cleaning.
+
+# Presence-based mowing (don't mow when people are home)
+- alias: "CloudHawk: Stop When People Arrive"
+  description: "Stop mowing when people arrive home"
+  trigger:
+    platform: state
+    entity_id: 
+      - person.user1  # Replace with your person entities
+      - person.user2
+    to: home
+  action:
+    - service: button.press
+      target:
+        entity_id: button.cloudhawk_mower_return_to_dock
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "👥 Mower Paused"
+        message: "CloudHawk mower returning to dock - people detected at home"
+
+# Resume mowing when everyone leaves (and conditions are good)
+- alias: "CloudHawk: Resume When Away"
+  description: "Resume mowing when everyone leaves"
+  trigger:
+    platform: state
+    entity_id: zone.home
+    to: "0"  # No one home
+    for:
+      minutes: 30  # Wait 30 minutes after everyone leaves
+  condition:
+    - condition: time
+      after: "08:00:00"
+      before: "18:00:00"
+    - condition: numeric_state
+      entity_id: sensor.cloudhawk_mower_battery_level
+      above: 40
+    - condition: state
+      entity_id: weather.home
+      state: 
+        - sunny
+        - cloudy
+        - partlycloudy
+  action:
+    - service: button.press
+      target:
+        entity_id: button.cloudhawk_mower_start_mowing
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "🏠 Mower Resumed"
+        message: "CloudHawk mower started - house is empty"
+
+# Night mode - ensure mower is docked
+- alias: "CloudHawk: Night Dock"
+  description: "Ensure mower is docked at night"
+  trigger:
+    platform: time
+    at: "20:00:00"
+  condition:
+    - condition: template
+      value_template: "{{ not state_attr('sensor.cloudhawk_mower_battery_level', 'charging') }}"
+  action:
+    - service: button.press
+      target:
+        entity_id: button.cloudhawk_mower_return_to_dock
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "🌙 Mower Night Mode"
+        message: "CloudHawk mower returning to dock for the night"
