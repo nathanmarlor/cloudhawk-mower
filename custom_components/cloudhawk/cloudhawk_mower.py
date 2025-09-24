@@ -37,6 +37,8 @@ from enum import Enum
 from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
+logger = logging.getLogger(__name__)
+
 class MowerState(Enum):
     """Simple mower operational states"""
     UNKNOWN = "unknown"
