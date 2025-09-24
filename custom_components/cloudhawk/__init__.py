@@ -47,9 +47,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Start connection establishment as first task after setup
     asyncio.create_task(coordinator._establish_connection())
     
-    # Trigger first refresh to get initial data (will wait for connection)
-    await coordinator.async_config_entry_first_refresh()
-    
     return True
 
 
