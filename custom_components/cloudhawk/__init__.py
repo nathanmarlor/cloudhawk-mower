@@ -38,15 +38,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up callback to be notified when mower sends new data
     mower.set_data_update_callback(coordinator._on_mower_data_update)
     
-    # Establish initial connection before proceeding
-    try:
-        await coordinator._establish_connection()
-    except Exception as ex:
-        raise ConfigEntryNotReady(f"Could not establish initial connection: {ex}") from ex
-    
+    # Store coordinator in hass data
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     
+    # Set up platforms first
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    
+    # Start connection establishment as first task after setup
+    asyncio.create_task(coordinator._establish_connection())
+    
+    # Trigger first refresh to get initial data (will wait for connection)
+    await coordinator.async_config_entry_first_refresh()
     
     return True
 
@@ -103,10 +105,9 @@ class CloudHawkDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Update data from library store.
         
-        This method is now called by mower data callbacks rather than regular polling,
-        making updates much more responsive and efficient.
+        This method gets data from the library's response store.
         """
-        try:
+        try:      
             # Get mower information from the library's response store
             mower_info = await self.mower.get_mower_info()
             
