@@ -35,8 +35,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         name=name,
     )
     
-    # Set up callback to be notified when mower sends new data
+    # Set up callbacks to be notified when mower sends new data or connection status changes
     mower.set_data_update_callback(coordinator._on_mower_data_update)
+    mower.set_connection_status_callback(coordinator._on_connection_status_change)
     
     # Store coordinator in hass data
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -85,6 +86,22 @@ class CloudHawkDataUpdateCoordinator(DataUpdateCoordinator):
     def _on_mower_data_update(self):
         """Callback triggered when mower sends new data"""
         _LOGGER.debug("New mower data received, scheduling HA update")
+        
+        # Schedule an async update in the event loop
+        def schedule_update():
+            asyncio.create_task(self.async_request_refresh())
+        
+        # Run in the event loop if we're in one, otherwise schedule it
+        try:
+            loop = asyncio.get_running_loop()
+            loop.call_soon_threadsafe(schedule_update)
+        except RuntimeError:
+            # No event loop running, schedule it for later
+            asyncio.create_task(self.async_request_refresh())
+    
+    def _on_connection_status_change(self):
+        """Callback triggered when mower connection status changes"""
+        _LOGGER.info(f"Connection status changed, mower connected: {self.mower.is_connected()}")
         
         # Schedule an async update in the event loop
         def schedule_update():

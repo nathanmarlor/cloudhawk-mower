@@ -333,8 +333,14 @@ class CloudHawkMower:
     
     async def start_constant_listener(self):
         """Start the constant notification listener to capture all responses"""
-        if self._listener_active or not self.is_connected():
+        if not self.is_connected():
+            logger.warning("Cannot start listener: not connected")
             return
+            
+        # If listener is already active, stop it first to restart cleanly
+        if self._listener_active:
+            logger.info("Stopping existing listener before restarting")
+            await self.stop_constant_listener()
             
         self._listener_active = True
         logger.info("Starting constant notification listener")
