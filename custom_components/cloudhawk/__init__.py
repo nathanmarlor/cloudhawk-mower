@@ -14,7 +14,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON, Platform.SWITCH]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON, Platform.SWITCH, Platform.LAWN_MOWER]
 
 # No regular polling - updates triggered by mower data callbacks
 UPDATE_INTERVAL = timedelta(hours=1)  # Very long interval as fallback
