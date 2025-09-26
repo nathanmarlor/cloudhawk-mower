@@ -15,8 +15,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to the mower. Make sure it's powered on and within range.",
-      "unknown": "Unexpected error occurred."
+      "cannot_connect": "Failed to connect to the mower. Make sure it's powered on and within Bluetooth range.",
+      "unknown": "An unexpected error occurred. Please try again."
     },
     "abort": {
       "already_configured": "This mower is already configured."

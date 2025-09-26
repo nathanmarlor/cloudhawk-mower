@@ -20,7 +20,7 @@ SWITCH_DESCRIPTIONS: tuple[SwitchEntityDescription, ...] = (
     ),
     SwitchEntityDescription(
         key="ultrasonic_enabled",
-        name="Ultrasonic Sensor",
+        name="Ultrasonic Obstacle Detection",
         icon="mdi:radar",
     ),
 )
@@ -53,7 +53,9 @@ class CloudHawkSwitchEntity(CoordinatorEntity, SwitchEntity):
         """Initialize the switch."""
         super().__init__(coordinator)
         self.entity_description = description
-        self._attr_unique_id = f"{coordinator.address}_{description.key}"
+        # Use device name for unique_id to get better entity names
+        device_id = coordinator.device_name.lower().replace(" ", "_").replace("-", "_")
+        self._attr_unique_id = f"{device_id}_{description.key}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, coordinator.address)},
             "name": coordinator.device_name,

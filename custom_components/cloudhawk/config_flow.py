@@ -17,8 +17,8 @@ _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("address"): str,
-        vol.Optional("name", default="CloudHawk Mower"): str,
+        vol.Required("address", description="Enter the Bluetooth MAC address of your CloudHawk mower"): str,
+        vol.Optional("name", default="CloudHawk Mower", description="Give your mower a friendly name"): str,
     }
 )
 
@@ -56,7 +56,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step."""
+        """Handle the initial step for manual configuration."""
         errors: dict[str, str] = {}
         
         if user_input is not None:
@@ -83,7 +83,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_bluetooth(self, discovery_info) -> FlowResult:
-        """Handle bluetooth discovery."""
+        """Handle automatic Bluetooth discovery."""
         address = discovery_info.address
         await self.async_set_unique_id(address)
         self._abort_if_unique_id_configured()
@@ -104,7 +104,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_bluetooth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Confirm bluetooth discovery."""
+        """Confirm automatic Bluetooth discovery."""
         errors: dict[str, str] = {}
         
         if user_input is not None:
