@@ -17,8 +17,8 @@ _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("address", description="Enter the Bluetooth MAC address of your CloudHawk mower"): str,
-        vol.Optional("name", default="CloudHawk Mower", description="Give your mower a friendly name"): str,
+        vol.Required("address"): str,
+        vol.Optional("name", default="CloudHawk Mower"): str,
     }
 )
 

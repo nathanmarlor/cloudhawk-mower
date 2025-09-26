@@ -6,7 +6,7 @@
         "description": "Enter your mower's Bluetooth address",
         "data": {
           "address": "Bluetooth Address (MAC)",
-          "name": "Device Name"
+          "name": "Device Name (e.g., RoboMower)"
         }
       },
       "bluetooth_confirm": {
