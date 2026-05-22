@@ -1,3 +1,5 @@
+#UPDATE
+
 When the mower loses BLE connection, the connection maintenance loop calls connect() without an address, causing it to fall back to BleakScanner.discover(). This scan is often 
 fails to find the mower, meaning the integration never reconnects without a manual reload.
 
@@ -5,7 +7,7 @@ Fix: store the device address on first successful connection as _last_address, a
 
 Tested on YardForce mower MB400 via ESPHome Bluetooth proxy.
 
-
+#UPDATE
 
 
 
