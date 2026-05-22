@@ -167,6 +167,9 @@ class CloudHawkMower:
         # Connection maintenance
         self._connection_maintenance_task: Optional[asyncio.Task] = None
         self._maintenance_active = False
+
+        # FIX: Store the last known address so reconnection doesn't need to scan
+        self._last_address: Optional[str] = None
     
     def set_data_update_callback(self, callback: Callable):
         """Set callback to be called when new data arrives from mower"""
@@ -229,16 +232,24 @@ class CloudHawkMower:
     
     async def connect(self, address: Optional[str] = None) -> bool:
         """Connect to the mower"""
+        # FIX: Use last known address if none provided, before falling back to scan
         if not address:
-            address = await self.scan_for_mower()
-            if not address:
-                return False
+            if self._last_address:
+                logger.info(f"No address provided, using last known address: {self._last_address}")
+                address = self._last_address
+            else:
+                address = await self.scan_for_mower()
+                if not address:
+                    return False
         
         try:
             logger.info(f"Connecting to mower at {address}...")
             self.client = BleakClient(address, timeout=self.timeout)
             await self.client.connect()
             
+            # FIX: Store address after successful connection
+            self._last_address = address
+
             # Find the correct service and characteristics
             services = self.client.services
             
@@ -317,13 +328,13 @@ class CloudHawkMower:
             try:            
                 if self._maintenance_active and not self.is_connected():
                     logger.warning("Connection lost, attempting to reconnect")
-                    # Try to reconnect (will use the last known address)
-                    if await self.connect():
+                    # FIX: Pass last known address directly — avoids slow/unreliable scan
+                    if await self.connect(address=self._last_address):
                         logger.info("Connection successful")
                     else:
                         logger.warning("Connection failed, will retry in 5 seconds")
                 
-                await asyncio.sleep(5)  # Check every 30 seconds
+                await asyncio.sleep(5)  # Check every 5 seconds
             except asyncio.CancelledError:
                 logger.debug("Connection maintenance task cancelled")
                 break
