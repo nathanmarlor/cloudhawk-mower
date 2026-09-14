@@ -199,3 +199,19 @@ Watched an MB400 do a "mow once" session and return to dock while reading BLE, w
   capture. So it is **not** an "out of dock" flag — more like a busy / not-fully-charged token. Unconfirmed until
   a 100 % idle reading is seen again.
 
+## Blade-load / wheel-rotation experiment (2026-09-14)
+
+Tested the `2f`/`10`/`59` live fields directly: baseline on charger (blade off), then START (blade + drive),
+then STOP on the grass, watching each field.
+
+- **Not blade load / cutting resistance.** Engaging blade+drive did not change `10` or `2f`; both already
+  fluctuate while parked on the charger with the blade off (`10` byte 15 wanders 0x00-0xe0 at rest).
+- **Not wheel rotation / odometry.** No accumulation or byte wrap; the `0a 0a` / `21 21` pairs in `2f` never
+  changed and never split into unequal left/right values.
+- **`2f` byte 7 = boundary-wire signal / position.** ~0x19-0x1c (25-28) on/beside the dock, 0xb2-0xf3 (178-243)
+  out on the open lawn - it tracks distance from the dock/perimeter wire, the loop-signal the mower navigates by.
+- **`10` byte 15** is a noisy free-running value (0-192) with no clean correlate.
+- **`59` = constant 0xdb**; the single 0x00 at session start was a startup artifact, not a state flag.
+
+None of these are worth exposing as entities.
+
