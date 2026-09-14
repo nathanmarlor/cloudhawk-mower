@@ -1,139 +1,118 @@
-"""Config flow for CloudHawk Lawn Mower integration."""
-import asyncio
+"""Config flow for CloudHawk Lawn Mower."""
+
+from __future__ import annotations
+
 import logging
 from typing import Any
 
 import voluptuous as vol
-from homeassistant import config_entries
+from bleak.exc import BleakError
 from homeassistant.components import bluetooth
-from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResult
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.const import CONF_ADDRESS, CONF_NAME
+from homeassistant.helpers.device_registry import format_mac
 
-from .cloudhawk_mower import CloudHawkMower
-from .const import DOMAIN
+from .cloudhawk_mower import INFO_COMMANDS, CloudHawkMower
+from .const import DEFAULT_NAME, DOMAIN
+from .protocol import SERVICE_UUID
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("address"): str,
-        vol.Optional("name", default="CloudHawk Mower"): str,
-    }
-)
 
-
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect."""
-    mower = CloudHawkMower()
-    
-    try:
-        if not await mower.connect(data["address"]):
-            raise CannotConnect
-        
-        # Get basic info to validate connection
-        info = await mower.get_mower_info()
-        serial = info.serial_number or "Unknown"
-        
-        await mower.disconnect()
-        
-        return {"title": f"CloudHawk {serial}", "serial": serial}
-        
-    except Exception as ex:
-        _LOGGER.error(f"Connection test failed: {ex}")
-        raise CannotConnect from ex
-
-
-class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for CloudHawk Lawn Mower."""
-
+class CloudHawkConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
-    def __init__(self):
-        """Initialize the config flow."""
-        self.discovered_devices = {}
+    def __init__(self) -> None:
+        self._discovered: dict[str, str] = {}  # address -> display name
+        self._discovery: BluetoothServiceInfoBleak | None = None
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle the initial step for manual configuration."""
-        errors: dict[str, str] = {}
-        
-        if user_input is not None:
-            try:
-                info = await validate_input(self.hass, user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-            else:
-                # Check if already configured
-                await self.async_set_unique_id(user_input["address"])
-                self._abort_if_unique_id_configured()
-                
-                # If user didn't change the default name, use the device title instead
-                if user_input["name"] == "CloudHawk Mower":
-                    user_input["name"] = info["title"]
-                
-                return self.async_create_entry(title=info["title"], data=user_input)
-
-        return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+    async def _probe(self, address: str) -> str | None:
+        """Connect once and return the serial number (or None on failure)."""
+        ble_device = bluetooth.async_ble_device_from_address(
+            self.hass, address, connectable=True
         )
+        if ble_device is None:
+            return None
+        mower = CloudHawkMower(address, ble_device)
+        try:
+            await mower.connect()
+            await mower.refresh(INFO_COMMANDS)
+            return mower.data.serial or ""
+        except (BleakError, TimeoutError) as err:
+            _LOGGER.debug("Probe of %s failed: %s", address, err)
+            return None
+        finally:
+            await mower.disconnect()
 
-    async def async_step_bluetooth(self, discovery_info) -> FlowResult:
-        """Handle automatic Bluetooth discovery."""
-        address = discovery_info.address
-        await self.async_set_unique_id(address)
+    async def async_step_bluetooth(
+        self, discovery_info: BluetoothServiceInfoBleak
+    ) -> ConfigFlowResult:
+        await self.async_set_unique_id(format_mac(discovery_info.address))
         self._abort_if_unique_id_configured()
-        
-        # Try to get device name
-        device_name = discovery_info.name or "CloudHawk Mower"
-        
-        self.context["title_placeholders"] = {"name": device_name}
-        
-        # Store discovery info for later
-        self.discovered_devices[address] = {
-            "address": address,
-            "name": device_name,
+        self._discovery = discovery_info
+        self.context["title_placeholders"] = {
+            "name": discovery_info.name or discovery_info.address
         }
-        
         return await self.async_step_bluetooth_confirm()
 
     async def async_step_bluetooth_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Confirm automatic Bluetooth discovery."""
-        errors: dict[str, str] = {}
-        
+    ) -> ConfigFlowResult:
+        assert self._discovery is not None
         if user_input is not None:
-            address = self.unique_id
-            device_info = self.discovered_devices.get(address, {})
-            
-            data = {
-                "address": address,
-                "name": device_info.get("name", "CloudHawk Mower"),
-            }
-            
-            try:
-                info = await validate_input(self.hass, data)
-                # If using default name, use the device title instead
-                if data["name"] == "CloudHawk Mower":
-                    data["name"] = info["title"]
-                return self.async_create_entry(title=info["title"], data=data)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-
+            name = user_input.get(CONF_NAME) or DEFAULT_NAME
+            if (serial := await self._probe(self._discovery.address)) is None:
+                return self.async_abort(reason="cannot_connect")
+            return self._entry(self._discovery.address, name, serial)
         return self.async_show_form(
             step_id="bluetooth_confirm",
-            description_placeholders={"name": self.context["title_placeholders"]["name"]},
+            data_schema=vol.Schema(
+                {vol.Optional(CONF_NAME, default=DEFAULT_NAME): str}
+            ),
+            description_placeholders={
+                "name": self._discovery.name or self._discovery.address
+            },
+        )
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            address = user_input[CONF_ADDRESS]
+            await self.async_set_unique_id(format_mac(address), raise_on_progress=False)
+            self._abort_if_unique_id_configured()
+            name = user_input.get(CONF_NAME) or DEFAULT_NAME
+            if (serial := await self._probe(address)) is not None:
+                return self._entry(address, name, serial)
+            errors["base"] = "cannot_connect"
+
+        current = self._async_current_ids()
+        for info in bluetooth.async_discovered_service_info(
+            self.hass, connectable=True
+        ):
+            if format_mac(info.address) in current:
+                continue
+            if SERVICE_UUID in info.service_uuids or (info.name or "").startswith("SN"):
+                self._discovered[info.address] = (
+                    f"{info.name or 'CloudHawk'} ({info.address})"
+                )
+        if not self._discovered:
+            return self.async_abort(reason="no_devices_found")
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_ADDRESS): vol.In(self._discovered),
+                    vol.Optional(CONF_NAME, default=DEFAULT_NAME): str,
+                }
+            ),
             errors=errors,
         )
 
-
-class CannotConnect(HomeAssistantError):
-    """Error to indicate we cannot connect."""
+    def _entry(self, address: str, name: str, serial: str) -> ConfigFlowResult:
+        title = f"{name} {serial}".strip() if serial and name == DEFAULT_NAME else name
+        return self.async_create_entry(
+            title=title, data={CONF_ADDRESS: address, CONF_NAME: name}
+        )

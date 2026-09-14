@@ -1,177 +1,206 @@
 """CloudHawk Lawn Mower integration for Home Assistant."""
+
+from __future__ import annotations
+
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
+from bleak.exc import BleakError
+from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.const import CONF_ADDRESS, CONF_NAME, Platform
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .cloudhawk_mower import CloudHawkMower
-from .const import DOMAIN
+from .cloudhawk_mower import STATS_COMMANDS, CloudHawkMower
+from .const import DEFAULT_NAME, DOMAIN
+from .protocol import MowerData
+from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON, Platform.SWITCH, Platform.LAWN_MOWER]
+PLATFORMS: list[Platform] = [
+    Platform.LAWN_MOWER,
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.SWITCH,
+    Platform.SELECT,
+    Platform.NUMBER,
+    Platform.BUTTON,
+]
 
-# No regular polling - updates triggered by mower data callbacks
-UPDATE_INTERVAL = timedelta(hours=1)  # Very long interval as fallback
+STATS_INTERVAL = timedelta(minutes=10)
+RECONNECT_DELAYS = (5, 10, 30, 60)
+HEARTBEAT_TIMEOUT = timedelta(minutes=3)  # mower heartbeats every 60 s
 
-
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up CloudHawk from a config entry."""
-    address = entry.data["address"]
-    name = entry.data.get("name", "CloudHawk Mower")
-    
-    mower = CloudHawkMower()
-    
-    # Create coordinator first
-    coordinator = CloudHawkDataUpdateCoordinator(
-        hass,
-        mower=mower,
-        address=address,
-        name=name,
-    )
-    
-    # Set up callback to be notified when mower sends new data
-    mower.set_data_update_callback(coordinator._on_mower_data_update)
-    
-    # Store coordinator in hass data
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    
-    # Set up platforms first
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    
-    # Start connection establishment as first task after setup
-    asyncio.create_task(coordinator._establish_connection())
-    
-    return True
+type CloudHawkConfigEntry = ConfigEntry[CloudHawkCoordinator]
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        coordinator = hass.data[DOMAIN].pop(entry.entry_id)
-        await coordinator.mower.disconnect()
-    
-    return unload_ok
+class CloudHawkCoordinator(DataUpdateCoordinator[MowerData]):
+    """Keeps a persistent BLE connection and republishes pushed data."""
 
-
-class CloudHawkDataUpdateCoordinator(DataUpdateCoordinator):
-    """Class to manage fetching data from the CloudHawk mower."""
-    
-    def __init__(self, hass: HomeAssistant, mower: CloudHawkMower, address: str, name: str):
-        """Initialize."""
-        self.mower = mower
-        self.address = address
-        self.device_name = name  # Use device_name for entities
-        self._last_successful_data = None
-        self.hass = hass
-        
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, mower: CloudHawkMower
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
-            name=f"{name} Coordinator",  # Internal coordinator name
-            update_interval=UPDATE_INTERVAL,
+            name=entry.title,
+            update_interval=STATS_INTERVAL,
+            config_entry=entry,
         )
+        self.entry = entry
+        self.mower = mower
+        self.address = entry.data[CONF_ADDRESS]
+        self.device_name = entry.data.get(CONF_NAME, DEFAULT_NAME)
+        self._disconnected = asyncio.Event()
+        self._stop = asyncio.Event()
+        self._unsub_listeners = [
+            mower.add_listener(self._on_mower_data),
+            mower.add_disconnect_listener(self._on_mower_disconnect),
+        ]
+
+    # -- availability -------------------------------------------------------
 
     @property
-    def _attr_entity_registry_enabled_default(self) -> bool:
-        """Disable coordinator entity by default."""
-        return False
-    
-    def _on_mower_data_update(self):
-        """Callback triggered when mower sends new data"""
-        _LOGGER.debug("New mower data received, scheduling HA update")
-        
-        # Schedule an async update in the event loop
-        def schedule_update():
-            asyncio.create_task(self.async_request_refresh())
-        
-        # Run in the event loop if we're in one, otherwise schedule it
-        try:
-            loop = asyncio.get_running_loop()
-            loop.call_soon_threadsafe(schedule_update)
-        except RuntimeError:
-            # No event loop running, schedule it for later
-            asyncio.create_task(self.async_request_refresh())
-    
-
-    async def _async_update_data(self):
-        """Update data from library store.
-        
-        This method gets data from the library's response store.
-        """
-        try:      
-            # Get mower information from the library's response store
-            mower_info = await self.mower.get_mower_info()
-            
-            # Build the data response
-            data = {
-                "serial_number": mower_info.serial_number,
-                "firmware_version": mower_info.firmware_version,
-                "battery_level": mower_info.battery_level,
-                "is_charging": mower_info.is_charging,
-                "signal_type": mower_info.signal_type.name,
-                "trimming_enabled": mower_info.trimming_enabled,
-                "has_schedule": mower_info.has_schedule,
-                "status": mower_info.status.value.replace('_', ' ').title() if mower_info.status else "Unknown",
-                "fault_records": mower_info.fault_records,
-            }
-            
-            # Store successful data for reference
-            self._last_successful_data = data
-            _LOGGER.debug("Successfully updated mower data from store")
-            return data
-            
-        except Exception as ex:
-            _LOGGER.error(f"Error getting mower data: {ex}")
-            raise UpdateFailed(f"Error getting mower data: {ex}") from ex
-    
-    async def _establish_connection(self):
-        """Establish connection to mower, retrying until successful"""
-        _LOGGER.info("Establishing connection to mower")
-        
-        while True:
-            try:
-                if await self.mower.connect(self.address):
-                    _LOGGER.info("Connection established successfully")
-                    return
-                else:
-                    _LOGGER.warning("Connection failed, retrying in 5 seconds")
-                    await asyncio.sleep(5)
-            except Exception as ex:
-                _LOGGER.error(f"Error during connection attempt: {ex}, retrying in 5 seconds")
-                await asyncio.sleep(5)
-    
-    async def send_command(self, command_name: str) -> bool:
-        """Send a command to the mower via the library."""
-        try:
-            _LOGGER.debug(f"Sending command: {command_name}")
-            
-            if command_name == "start":
-                result = await self.mower.start_mowing()
-            elif command_name == "spiral":
-                result = await self.mower.start_spiral_cutting()
-            elif command_name == "edge":
-                result = await self.mower.start_edge_cutting()
-            elif command_name == "stop":
-                result = await self.mower.stop_mowing()
-            elif command_name == "dock":
-                result = await self.mower.return_to_dock()
-            else:
-                _LOGGER.error(f"Unknown command: {command_name}")
-                return False
-            
-            if result:
-                _LOGGER.debug(f"Command '{command_name}' successful")
-            else:
-                _LOGGER.warning(f"Command '{command_name}' failed")
-            
-            return result
-            
-        except Exception as ex:
-            _LOGGER.error(f"Error sending command {command_name}: {ex}")
+    def connected(self) -> bool:
+        if not self.mower.is_connected:
             return False
+        hb = self.mower.data.last_heartbeat
+        return hb is None or datetime.now() - hb < HEARTBEAT_TIMEOUT
+
+    # -- mower callbacks (may fire from bleak's thread) ------------------------
+
+    def _on_mower_data(self, data: MowerData) -> None:
+        self.hass.loop.call_soon_threadsafe(self.async_set_updated_data, data)
+
+    def _on_mower_disconnect(self) -> None:
+        self.hass.loop.call_soon_threadsafe(self._disconnected.set)
+        self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
+
+    # -- periodic poll ------------------------------------------------------
+
+    async def _async_update_data(self) -> MowerData:
+        if self.mower.is_connected:
+            if not self.connected:
+                # GATT link says connected but heartbeats stopped: drop it so run() reconnects.
+                _LOGGER.warning(
+                    "%s: no heartbeat for %s, reconnecting",
+                    self.name,
+                    HEARTBEAT_TIMEOUT,
+                )
+                await self.mower.disconnect()
+                self._disconnected.set()
+                return self.mower.data
+            try:
+                await self.mower.refresh(STATS_COMMANDS)
+            except BleakError as err:
+                _LOGGER.debug("%s: stats refresh failed: %s", self.name, err)
+        return self.mower.data
+
+    # -- connection loop ----------------------------------------------------
+
+    async def run(self) -> None:
+        """Connect, stay connected, reconnect with backoff. Runs until unload."""
+        attempt = 0
+        while not self._stop.is_set():
+            ble_device = bluetooth.async_ble_device_from_address(
+                self.hass, self.address, connectable=True
+            )
+            if ble_device is None:
+                _LOGGER.debug(
+                    "%s: not seen by any Bluetooth adapter/proxy yet", self.name
+                )
+            else:
+                self.mower.set_ble_device(ble_device)
+                try:
+                    await self.mower.connect()
+                    attempt = 0
+                    self._disconnected.clear()
+                    await self.mower.refresh_all()
+                    self.async_set_updated_data(self.mower.data)
+                    self._update_device_registry()
+                    await self._wait_disconnect_or_stop()
+                    continue
+                except (BleakError, asyncio.TimeoutError) as err:
+                    _LOGGER.warning("%s: connection failed: %s", self.name, err)
+            delay = RECONNECT_DELAYS[min(attempt, len(RECONNECT_DELAYS) - 1)]
+            attempt += 1
+            try:
+                await asyncio.wait_for(self._stop.wait(), delay)
+            except asyncio.TimeoutError:
+                pass
+
+    @callback
+    def _update_device_registry(self) -> None:
+        """Entities register the device before the mower has answered; fill in what we learned."""
+        registry = dr.async_get(self.hass)
+        device = registry.async_get_device(identifiers={(DOMAIN, self.address)})
+        data = self.mower.data
+        if device and (data.firmware or data.serial):
+            registry.async_update_device(
+                device.id, sw_version=data.firmware, serial_number=data.serial
+            )
+
+    async def _wait_disconnect_or_stop(self) -> None:
+        stop = asyncio.ensure_future(self._stop.wait())
+        gone = asyncio.ensure_future(self._disconnected.wait())
+        try:
+            await asyncio.wait({stop, gone}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            stop.cancel()
+            gone.cancel()
+
+    async def async_shutdown(self) -> None:
+        """Called on unload and on HA stop; safe to run twice."""
+        if self._stop.is_set():
+            return
+        self._stop.set()
+        for unsub in self._unsub_listeners:
+            unsub()
+        await self.mower.disconnect()
+        await super().async_shutdown()
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: CloudHawkConfigEntry) -> bool:
+    address = entry.data[CONF_ADDRESS]
+    mower = CloudHawkMower(address, name=entry.data.get(CONF_NAME, DEFAULT_NAME))
+    coordinator = CloudHawkCoordinator(hass, entry, mower)
+    entry.runtime_data = coordinator
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    async_setup_services(hass)
+
+    entry.async_create_background_task(
+        hass, coordinator.run(), f"{DOMAIN}_{address}_connection"
+    )
+
+    @callback
+    def _seen(
+        _info: bluetooth.BluetoothServiceInfoBleak, _change: bluetooth.BluetoothChange
+    ) -> None:
+        # Advertisement seen: refresh the cached BLEDevice so the next connect uses the best path.
+        if dev := bluetooth.async_ble_device_from_address(
+            hass, address, connectable=True
+        ):
+            mower.set_ble_device(dev)
+
+    entry.async_on_unload(
+        bluetooth.async_register_callback(
+            hass,
+            _seen,
+            {"address": address, "connectable": True},
+            bluetooth.BluetoothScanningMode.ACTIVE,
+        )
+    )
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: CloudHawkConfigEntry) -> bool:
+    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        coordinator: CloudHawkCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        await coordinator.async_shutdown()
+    return unload_ok

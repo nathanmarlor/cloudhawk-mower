@@ -1,94 +1,79 @@
-"""CloudHawk Lawn Mower switch platform."""
+"""CloudHawk switches - settings with real setters, read back after each write."""
+
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import CloudHawkDataUpdateCoordinator
-from .const import DOMAIN
+from . import CloudHawkConfigEntry
+from .cloudhawk_mower import CloudHawkMower
+from .entity import CloudHawkEntity
+from .protocol import MowerData
 
-SWITCH_DESCRIPTIONS: tuple[SwitchEntityDescription, ...] = (
-    SwitchEntityDescription(
-        key="trimming_enabled",
-        name="Boundary Trimming",
-        icon="mdi:scissors-cutting",
+
+@dataclass(frozen=True, kw_only=True)
+class CloudHawkSwitchDescription(SwitchEntityDescription):
+    value_fn: Callable[[MowerData], bool | None]
+    set_fn: Callable[[CloudHawkMower, bool], Awaitable[None]]
+
+
+SWITCHES: tuple[CloudHawkSwitchDescription, ...] = (
+    CloudHawkSwitchDescription(
+        key="trimming",
+        entity_category=EntityCategory.CONFIG,
+        value_fn=lambda d: d.trimming,
+        set_fn=lambda m, on: m.set_trimming(on),
     ),
-    SwitchEntityDescription(
-        key="ultrasonic_enabled",
-        name="Ultrasonic Obstacle Detection",
-        icon="mdi:radar",
+    CloudHawkSwitchDescription(
+        key="ultrasonic",
+        entity_category=EntityCategory.CONFIG,
+        value_fn=lambda d: d.ultrasonic,
+        set_fn=lambda m, on: m.set_ultrasonic(on),
+    ),
+    CloudHawkSwitchDescription(
+        key="rain_sensor",
+        entity_category=EntityCategory.CONFIG,
+        value_fn=lambda d: d.rain_sensor,
+        set_fn=lambda m, on: m.set_rain_sensor(on),
+    ),
+    CloudHawkSwitchDescription(
+        key="mowing_time_mode",
+        entity_category=EntityCategory.CONFIG,
+        value_fn=lambda d: d.mowing_time_mode,
+        set_fn=lambda m, on: m.set_mowing_time_mode(on),
     ),
 )
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: CloudHawkConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up CloudHawk switch platform."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-    
-    entities = [
-        CloudHawkSwitchEntity(coordinator, description)
-        for description in SWITCH_DESCRIPTIONS
-    ]
-    
-    async_add_entities(entities)
+    async_add_entities(CloudHawkSwitch(entry.runtime_data, d) for d in SWITCHES)
 
 
-class CloudHawkSwitchEntity(CoordinatorEntity, SwitchEntity):
-    """CloudHawk switch entity."""
-    
-    def __init__(
-        self,
-        coordinator: CloudHawkDataUpdateCoordinator,
-        description: SwitchEntityDescription,
-    ) -> None:
-        """Initialize the switch."""
-        super().__init__(coordinator)
-        self.entity_description = description
-        # Use device name for unique_id to get better entity names
-        device_id = coordinator.device_name.lower().replace(" ", "_").replace("-", "_")
-        self._attr_unique_id = f"{device_id}_{description.key}"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, coordinator.address)},
-            "name": coordinator.device_name,
-            "manufacturer": "CloudHawk",
-            "model": "Lawn Mower",
-            "sw_version": coordinator.data.get("firmware_version") if coordinator.data else None,
-        }
-    
-    @property
-    def name(self) -> str:
-        """Return the name of the switch."""
-        return f"{self.coordinator.device_name} {self.entity_description.name}"
-    
+class CloudHawkSwitch(CloudHawkEntity, SwitchEntity):
+    entity_description: CloudHawkSwitchDescription
+
+    def __init__(self, coordinator, description: CloudHawkSwitchDescription) -> None:
+        super().__init__(coordinator, description)
+        self._attr_translation_key = description.key
+
     @property
     def is_on(self) -> bool | None:
-        """Return true if switch is on."""
-        if not self.coordinator.data:
-            return None
-        return self.coordinator.data.get(self.entity_description.key, False)
-    
-    @property
-    def available(self) -> bool:
-        """Return if entity is available."""
-        return self.coordinator.last_update_success
-    
+        return self.entity_description.value_fn(self.data)
+
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn the switch on."""
-        # Note: These would need to be implemented in the CloudHawk library
-        # For now, they are read-only switches showing current state
-        pass
-    
+        await self.entity_description.set_fn(self.coordinator.mower, True)
+        self.async_write_ha_state()
+
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn the switch off."""
-        # Note: These would need to be implemented in the CloudHawk library
-        # For now, they are read-only switches showing current state
-        pass
+        await self.entity_description.set_fn(self.coordinator.mower, False)
+        self.async_write_ha_state()

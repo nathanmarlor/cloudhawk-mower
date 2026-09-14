@@ -1,92 +1,68 @@
-"""CloudHawk Lawn Mower button platform."""
+"""CloudHawk buttons."""
+
 from __future__ import annotations
 
-from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
-from homeassistant.config_entries import ConfigEntry
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+
+from homeassistant.components.button import (
+    ButtonDeviceClass,
+    ButtonEntity,
+    ButtonEntityDescription,
+)
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
-from . import CloudHawkDataUpdateCoordinator
-from .const import DOMAIN
+from . import CloudHawkConfigEntry, CloudHawkCoordinator
+from .entity import CloudHawkEntity
 
-BUTTON_DESCRIPTIONS: tuple[ButtonEntityDescription, ...] = (
-    ButtonEntityDescription(
-        key="start",
-        name="Start Mowing",
-        icon="mdi:play",
+
+@dataclass(frozen=True, kw_only=True)
+class CloudHawkButtonDescription(ButtonEntityDescription):
+    press_fn: Callable[[CloudHawkCoordinator], Awaitable[None]]
+
+
+BUTTONS: tuple[CloudHawkButtonDescription, ...] = (
+    CloudHawkButtonDescription(key="start", press_fn=lambda c: c.mower.start_mowing()),
+    CloudHawkButtonDescription(
+        key="start_once", press_fn=lambda c: c.mower.start_mowing_once()
     ),
-    ButtonEntityDescription(
-        key="spiral",
-        name="Spiral Cut",
-        icon="mdi:spiral",
+    CloudHawkButtonDescription(
+        key="spiral_cut", press_fn=lambda c: c.mower.spiral_cut()
     ),
-    ButtonEntityDescription(
-        key="edge",
-        name="Edge Cut",
-        icon="mdi:square-outline",
+    CloudHawkButtonDescription(key="edge_cut", press_fn=lambda c: c.mower.edge_cut()),
+    CloudHawkButtonDescription(key="stop", press_fn=lambda c: c.mower.stop()),
+    CloudHawkButtonDescription(key="dock", press_fn=lambda c: c.mower.return_to_dock()),
+    CloudHawkButtonDescription(
+        key="sync_clock",
+        entity_category=EntityCategory.CONFIG,
+        press_fn=lambda c: c.mower.sync_clock(dt_util.now().replace(tzinfo=None)),
     ),
-    ButtonEntityDescription(
-        key="stop",
-        name="Stop Mowing",
-        icon="mdi:stop",
-    ),
-    ButtonEntityDescription(
-        key="dock",
-        name="Return to Dock",
-        icon="mdi:home",
+    CloudHawkButtonDescription(
+        key="refresh",
+        device_class=ButtonDeviceClass.UPDATE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        press_fn=lambda c: c.mower.refresh_all(),
     ),
 )
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: CloudHawkConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up CloudHawk button platform."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-    
-    entities = [
-        CloudHawkButtonEntity(coordinator, description)
-        for description in BUTTON_DESCRIPTIONS
-    ]
-    
-    async_add_entities(entities)
+    async_add_entities(CloudHawkButton(entry.runtime_data, d) for d in BUTTONS)
 
 
-class CloudHawkButtonEntity(CoordinatorEntity, ButtonEntity):
-    """CloudHawk button entity."""
-    
-    def __init__(
-        self,
-        coordinator: CloudHawkDataUpdateCoordinator,
-        description: ButtonEntityDescription,
-    ) -> None:
-        """Initialize the button."""
-        super().__init__(coordinator)
-        self.entity_description = description
-        # Use device name for unique_id to get better entity names
-        device_id = coordinator.device_name.lower().replace(" ", "_").replace("-", "_")
-        self._attr_unique_id = f"{device_id}_{description.key}"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, coordinator.address)},
-            "name": coordinator.device_name,
-            "manufacturer": "CloudHawk",
-            "model": "Lawn Mower",
-            "sw_version": coordinator.data.get("firmware_version") if coordinator.data else None,
-        }
-    
-    @property
-    def name(self) -> str:
-        """Return the name of the button."""
-        return f"{self.coordinator.device_name} {self.entity_description.name}"
-    
-    @property
-    def available(self) -> bool:
-        """Return if entity is available."""
-        return self.coordinator.last_update_success
-    
+class CloudHawkButton(CloudHawkEntity, ButtonEntity):
+    entity_description: CloudHawkButtonDescription
+
+    def __init__(self, coordinator, description: CloudHawkButtonDescription) -> None:
+        super().__init__(coordinator, description)
+        self._attr_translation_key = description.key
+
     async def async_press(self) -> None:
-        """Press the button."""
-        await self.coordinator.send_command(self.entity_description.key)
+        await self.entity_description.press_fn(self.coordinator)

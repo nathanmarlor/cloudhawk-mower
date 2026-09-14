@@ -1,18 +1,26 @@
 {
   "domain": "cloudhawk",
   "name": "CloudHawk Lawn Mower",
-  "documentation": "https://github.com/nathanmarlor/cloudhawk-mower",
-  "issue_tracker": "https://github.com/nathanmarlor/cloudhawk-mower/issues",
-  "codeowners": ["@nathanmarlor"],
-  "requirements": ["bleak>=0.20.0"],
-  "version": "1.0.0",
+  "codeowners": [
+    "@nathanmarlor"
+  ],
   "config_flow": true,
+  "dependencies": [
+    "bluetooth_adapters"
+  ],
+  "documentation": "https://github.com/nathanmarlor/cloudhawk-mower",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/nathanmarlor/cloudhawk-mower/issues",
   "bluetooth": [
     {
       "service_uuid": "0000ff12-0000-1000-8000-00805f9b34fb",
       "connectable": true
     }
   ],
-  "iot_class": "local_polling",
-  "integration_type": "device"
+  "requirements": [
+    "bleak>=0.21.0",
+    "bleak-retry-connector>=3.5.0"
+  ],
+  "version": "2.0.0"
 }

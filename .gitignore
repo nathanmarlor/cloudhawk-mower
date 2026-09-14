@@ -1,1 +1,4 @@
 CloudHawk_2.1.3_APKPure/
+__pycache__/
+.pytest_cache/
+.DS_Store

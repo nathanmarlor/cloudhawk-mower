@@ -1,27 +1,44 @@
-start:
-  name: Start Mowing
-  description: Start regular mowing cycle
-  target:
-    device:
-      integration: cloudhawk
+set_schedule:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: cloudhawk
+    monday: &day
+      required: false
+      example: '[{"start": "09:00", "end": "12:00"}, {"start": "15:00", "end": "18:00"}]'
+      selector:
+        object:
+    tuesday: *day
+    wednesday: *day
+    thursday: *day
+    friday: *day
+    saturday: *day
+    sunday: *day
 
-start_once:
-  name: Start Mowing Once
-  description: Start a single mowing session
-  target:
-    device:
-      integration: cloudhawk
+set_cut_days:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: cloudhawk
+    days:
+      required: true
+      selector:
+        select:
+          multiple: true
+          options: [monday, tuesday, wednesday, thursday, friday, saturday, sunday]
 
-stop:
-  name: Stop Mowing
-  description: Stop the mower immediately
-  target:
-    device:
-      integration: cloudhawk
-
-dock:
-  name: Return to Dock
-  description: Send the mower back to its charging dock
-  target:
-    device:
-      integration: cloudhawk
+set_pin:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: cloudhawk
+    pin:
+      required: true
+      selector:
+        text:

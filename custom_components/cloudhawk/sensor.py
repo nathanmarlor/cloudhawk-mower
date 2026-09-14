@@ -1,5 +1,11 @@
-"""CloudHawk Lawn Mower sensor platform."""
+"""CloudHawk sensors."""
+
 from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -7,145 +13,205 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTime
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+    UnitOfTime,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
-from . import CloudHawkDataUpdateCoordinator
-from .const import DOMAIN
+from . import CloudHawkConfigEntry
+from .entity import CloudHawkEntity
+from .protocol import ERROR_CODES, STATE_CODES, VOLTAGE_STATUS, MowerData
 
-SENSOR_DESCRIPTIONS: tuple[SensorEntityDescription, ...] = (
-    SensorEntityDescription(
+
+def _local(ts: datetime | None) -> datetime | None:
+    """Mower timestamps are naive local time."""
+    return (
+        dt_util.as_utc(ts.replace(tzinfo=dt_util.get_default_time_zone()))
+        if ts
+        else None
+    )
+
+
+@dataclass(frozen=True, kw_only=True)
+class CloudHawkSensorDescription(SensorEntityDescription):
+    value_fn: Callable[[MowerData], Any]
+    attrs_fn: Callable[[MowerData], dict[str, Any]] | None = None
+
+
+SENSORS: tuple[CloudHawkSensorDescription, ...] = (
+    CloudHawkSensorDescription(
         key="battery_level",
-        name="Battery Level",
-        native_unit_of_measurement=PERCENTAGE,
         device_class=SensorDeviceClass.BATTERY,
+        native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:battery",
+        value_fn=lambda d: d.battery_level,
     ),
-    SensorEntityDescription(
-        key="signal_type",
-        name="Boundary Signal",
-        icon="mdi:signal",
+    CloudHawkSensorDescription(
+        key="voltage",
+        device_class=SensorDeviceClass.VOLTAGE,
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.voltage,
     ),
-    SensorEntityDescription(
-        key="status",
-        name="Mower Status",
-        icon="mdi:state-machine",
+    CloudHawkSensorDescription(
+        key="current",
+        device_class=SensorDeviceClass.CURRENT,
+        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.current,
     ),
-    SensorEntityDescription(
-        key="firmware_version",
-        name="Firmware Version",
-        icon="mdi:chip",
+    CloudHawkSensorDescription(
+        key="battery_status",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(VOLTAGE_STATUS.values()),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: (
+            VOLTAGE_STATUS.get(d.voltage_status)
+            if d.voltage_status is not None
+            else None
+        ),
     ),
-    SensorEntityDescription(
-        key="serial_number",
-        name="Serial Number",
-        icon="mdi:identifier",
+    CloudHawkSensorDescription(
+        key="state",
+        device_class=SensorDeviceClass.ENUM,
+        options=[name for name, _ in STATE_CODES.values()],
+        value_fn=lambda d: d.state_name if d.state_code in STATE_CODES else None,
+        attrs_fn=lambda d: {"code": d.state_code},
     ),
-    SensorEntityDescription(
+    CloudHawkSensorDescription(
+        key="error",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(ERROR_CODES.values()),
+        value_fn=lambda d: d.error_name if d.error_code in ERROR_CODES else None,
+        attrs_fn=lambda d: {"code": d.error_code},
+    ),
+    CloudHawkSensorDescription(
+        key="boundary_signal",
+        device_class=SensorDeviceClass.ENUM,
+        options=["S1", "S2", "S3"],
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: f"S{d.signal}" if d.signal in (1, 2, 3) else None,
+    ),
+    CloudHawkSensorDescription(
+        key="total_work_time",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        suggested_unit_of_measurement=UnitOfTime.HOURS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda d: (
+            d.work_hours * 60 + d.work_minutes if d.work_hours is not None else None
+        ),
+    ),
+    CloudHawkSensorDescription(
+        key="charge_time",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.charge_time,
+    ),
+    CloudHawkSensorDescription(
         key="fault_count",
-        name="Fault Count",
-        icon="mdi:alert-circle",
         state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: len(d.fault_records),
+        attrs_fn=lambda d: {
+            "faults": [
+                {"time": r.timestamp.isoformat(), "code": r.code, "name": r.name}
+                for r in d.fault_records
+            ]
+        },
+    ),
+    CloudHawkSensorDescription(
+        key="last_fault",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda d: _local(
+            max((r.timestamp for r in d.fault_records), default=None)
+        ),
+        attrs_fn=lambda d: (
+            {"name": max(d.fault_records, key=lambda r: r.timestamp).name}
+            if d.fault_records
+            else {}
+        ),
+    ),
+    CloudHawkSensorDescription(
+        key="last_cut",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda d: _local(max(d.cutting_records, default=None)),
+        attrs_fn=lambda d: {"history": [t.isoformat() for t in d.cutting_records]},
+    ),
+    CloudHawkSensorDescription(
+        key="last_charge",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: _local(
+            max((r.timestamp for r in d.charging_records), default=None)
+        ),
+        attrs_fn=lambda d: {
+            "history": [
+                {"time": r.timestamp.isoformat(), "value": r.value}
+                for r in d.charging_records
+            ]
+        },
+    ),
+    CloudHawkSensorDescription(
+        key="mower_clock",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: (
+            _local(datetime.combine(d.mower_date, d.mower_time))
+            if d.mower_date and d.mower_time
+            else None
+        ),
+    ),
+    CloudHawkSensorDescription(
+        key="last_heartbeat",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda d: (
+            dt_util.as_utc(d.last_heartbeat.astimezone()) if d.last_heartbeat else None
+        ),
+    ),
+    CloudHawkSensorDescription(
+        key="firmware_version",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.firmware,
+    ),
+    CloudHawkSensorDescription(
+        key="serial_number",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.serial,
     ),
 )
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: CloudHawkConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up CloudHawk sensor platform."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-    
-    entities = [
-        CloudHawkSensorEntity(coordinator, description)
-        for description in SENSOR_DESCRIPTIONS
-    ]
-    
-    async_add_entities(entities)
+    async_add_entities(CloudHawkSensor(entry.runtime_data, desc) for desc in SENSORS)
 
 
-class CloudHawkSensorEntity(CoordinatorEntity, SensorEntity):
-    """CloudHawk sensor entity."""
-    
-    def __init__(
-        self,
-        coordinator: CloudHawkDataUpdateCoordinator,
-        description: SensorEntityDescription,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self.entity_description = description
-        # Use device name for unique_id to get better entity names
-        device_id = coordinator.device_name.lower().replace(" ", "_").replace("-", "_")
-        self._attr_unique_id = f"{device_id}_{description.key}"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, coordinator.address)},
-            "name": coordinator.device_name,
-            "manufacturer": "CloudHawk",
-            "model": "Lawn Mower",
-            "sw_version": coordinator.data.get("firmware_version") if coordinator.data else None,
-        }
-    
-    @property
-    def name(self) -> str:
-        """Return the name of the sensor."""
-        return f"{self.coordinator.device_name} {self.entity_description.name}"
-    
+class CloudHawkSensor(CloudHawkEntity, SensorEntity):
+    entity_description: CloudHawkSensorDescription
+
+    def __init__(self, coordinator, description: CloudHawkSensorDescription) -> None:
+        super().__init__(coordinator, description)
+        self._attr_translation_key = description.key
+
     @property
     def native_value(self):
-        """Return the state of the sensor."""
-        if not self.coordinator.data:
-            return None
-        
-        key = self.entity_description.key
-        
-        if key == "fault_count":
-            fault_records = self.coordinator.data.get("fault_records", [])
-            return len(fault_records)
-        
-        return self.coordinator.data.get(key)
-    
+        return self.entity_description.value_fn(self.data)
+
     @property
-    def available(self) -> bool:
-        """Return if entity is available."""
-        return self.coordinator.last_update_success
-    
-    @property
-    def extra_state_attributes(self) -> dict[str, str] | None:
-        """Return entity specific state attributes."""
-        if not self.coordinator.data:
-            return None
-        
-        attributes = {}
-        
-        # Add charging status to battery sensor
-        if self.entity_description.key == "battery_level":
-            attributes["charging"] = self.coordinator.data.get("is_charging", False)
-        
-        
-        # Add trimming and ultrasonic status
-        if self.entity_description.key == "signal_type":
-            attributes["trimming_enabled"] = self.coordinator.data.get("trimming_enabled", False)
-            attributes["ultrasonic_enabled"] = self.coordinator.data.get("ultrasonic_enabled", False)
-        
-        # Add fault details to fault count sensor
-        if self.entity_description.key == "fault_count":
-            fault_records = self.coordinator.data.get("fault_records", [])
-            if fault_records:
-                # Show last 3 faults
-                recent_faults = []
-                for fault in fault_records[-3:]:
-                    recent_faults.append(f"{fault.timestamp}: Error {fault.error_code}")
-                attributes["recent_faults"] = recent_faults
-        
-        # Add additional info to status sensor
-        if self.entity_description.key == "status":
-            attributes["device_type"] = "Lawn Mower"
-        
-        return attributes if attributes else None
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if fn := self.entity_description.attrs_fn:
+            return fn(self.data)
+        return None

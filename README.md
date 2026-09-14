@@ -1,269 +1,111 @@
-# CloudHawk Lawn Mower - Home Assistant Integration
+# CloudHawk Lawn Mower — Home Assistant integration
 
-A Home Assistant custom integration for CloudHawk lawn mowers using Bluetooth Low Energy (BLE) communication.
+Local Bluetooth LE control and monitoring for CloudHawk robotic lawn mowers. No cloud, no app account.
 
-**⚠️ Testing Status**: This integration has been tested with the CloudHawk MB400 model. Compatibility with other CloudHawk models is not guaranteed.
+Tested on a **CloudHawk MB400** (firmware `RM V6.01_2021`). Any CloudHawk / rebadged model that advertises the
+`ff12` BLE service and speaks the `55AA` protocol should work; see [PROTOCOL.md](PROTOCOL.md) for the full
+reverse-engineered command set.
 
-## Features
+## What you get
 
-### 📊 Sensors
-- **Status** - Current mower operation status (IDLE, MOWING, RETURNING, CHARGING)
-- **Battery Level** - Current battery percentage with charging status
-- **Signal Type** -  Boundary signal selection (S1, S2, etc.)
-- **Firmware Version** - Current mower firmware
-- **Serial Number** - Device serial number
-- **Fault Records** - Number of fault records with recent details
+**Lawn mower entity** — `lawn_mower.<name>` with start / pause (stop) / dock and the HA activity states
+mowing, returning, docked, paused, error. Cut days and the weekly schedule are exposed as attributes.
 
-### 🎛️ Controls
-- **Mow Now** - Begin regular mowing cycle
-- **Spiral Cut** - Start spiral cutting pattern
-- **Edge Cut** - Start edge cutting along boundaries
-- **Stop Mowing** - Immediately stop the mower
-- **Return to Dock** - Send mower back to charging station
+**Sensors**
 
-### ⚙️ Status Switches (Read-only)
-- **Boundary Trimming** - Shows if edge trimming is enabled
-- **Ultrasonic Sensor** - Shows if ultrasonic obstacle detection is enabled
+| Entity | Notes |
+|--------|-------|
+| Battery, battery voltage, battery current, battery status | pushed by the mower every 30 s |
+| State | the mower's own 22-value state code (charging, cutting, returning home, lifted, outside boundary, trapped, …) |
+| Error | last error code (low battery, no signal, M1/M2 brake, ERROR20L, …) |
+| Total work time, charge time | lifetime counters |
+| Fault count / last fault | full fault log with timestamps as attributes |
+| Last cut, last charge | from the mower's own records |
+| Boundary signal, firmware, serial, mower clock, last heartbeat | diagnostics |
+
+**Binary sensors** — charging, blade running, cover open, problem, connected.
+
+**Controls** — switches for boundary trimming, ultrasonic sensor, rain sensor, mowing-time mode; select for
+boundary signal (S1/S2/S3); numbers for ultrasonic distance, rain delay, cut width; buttons for start, mow once,
+spiral cut, edge cut, stop, return to dock, sync clock, refresh.
+
+**Services** — `cloudhawk.set_schedule`, `cloudhawk.set_cut_days`, `cloudhawk.set_pin`.
+
+## Requirements
+
+- Home Assistant 2024.8 or newer with the **Bluetooth** integration.
+- A path to the mower: a local Bluetooth adapter, or — usually better, since mowers live outside — an
+  **ESPHome Bluetooth proxy** (`bluetooth_proxy: active: true`) or Shelly near the dock. The integration uses HA's
+  Bluetooth stack, so proxies work out of the box. Note that an ESPHome proxy only serves one client at a time; HA
+  must be the only thing talking to it.
 
 ## Installation
 
-### Method 1: Manual Installation
+**HACS**: add this repository as a custom repository (category *Integration*), install, restart HA.
 
-1. Copy the `custom_components/cloudhawk` folder to your Home Assistant `custom_components` directory:
-   ```
-   homeassistant/
-   └── custom_components/
-       └── cloudhawk/
-           ├── __init__.py
-           ├── manifest.json
-           ├── config_flow.py
-           ├── sensor.py
-           ├── button.py
-           ├── switch.py
-           ├── services.yaml
-           └── cloudhawk_mower.py
-   ```
+**Manual**: copy `custom_components/cloudhawk` into your `config/custom_components/` directory and restart.
 
-2. Restart Home Assistant
+## Setup
 
-3. Go to **Settings** → **Devices & Services** → **Add Integration**
+The mower is discovered automatically as soon as any adapter or proxy sees it — accept the discovery under
+**Settings → Devices & services**. Otherwise **Add integration → CloudHawk** lists the mowers currently in range.
+The mower must be powered on; it advertises as `SN<serial>` with no name in the advertisement, so it shows up by
+address.
 
-4. Search for "CloudHawk" and select it
+## Behaviour
 
-### Method 2: HACS (Future)
+The integration keeps one BLE connection open. The mower pushes state and battery every 30 s and a heartbeat
+every 60 s; settings and counters are read on connect, every 10 minutes, and after every change you make. If the
+heartbeat stops the connection is dropped and re-established. Entities become unavailable while disconnected;
+`binary_sensor.<name>_connected` always reports the link state.
 
-*This integration will be available through HACS in the future. For now, please use manual installation.*
+## Example automations
 
-## Configuration
-
-### Automatic Discovery (Recommended)
-
-If your CloudHawk mower is discoverable via Bluetooth, it should appear automatically:
-
-1. Go to **Settings** → **Devices & Services**
-2. Look for "CloudHawk Lawn Mower" in discovered devices
-3. Click **Configure** and follow the setup wizard
-
-### Manual Configuration
-
-1. Go to **Settings** → **Devices & Services** → **Add Integration**
-2. Search for "CloudHawk"
-3. Enter the mower's Bluetooth MAC address
-4. Enter a friendly name (optional)
-5. Click **Submit**
-
-#### Finding Your Mower's Bluetooth Address
-
-You can find your mower's address using:
-
-```bash
-# On Linux/macOS with bluetoothctl
-bluetoothctl
-scan on
-# Look for device named like "SN0190104721"
-
-# On macOS with system_profiler
-system_profiler SPBluetoothDataType
-```
-
-Or use the included scanner:
-```python
-python3 bluetooth_scanner.py
-```
-
-## Usage
-
-### Lovelace Dashboard Cards
-
-#### Status Card
 ```yaml
-type: entities
-title: CloudHawk Mower
-entities:
-  - entity: sensor.cloudhawk_mower_battery_level
-  - entity: sensor.cloudhawk_mower_signal_type
-  - entity: switch.cloudhawk_mower_boundary_trimming
-  - entity: sensor.cloudhawk_mower_working_hours
-  - entity: sensor.cloudhawk_mower_fault_records
+# Mow on weekday mornings
+- alias: Mow weekdays
+  trigger: {platform: time, at: "09:00:00"}
+  condition: {condition: time, weekday: [mon, tue, wed, thu, fri]}
+  action: {action: lawn_mower.start_mowing, target: {entity_id: lawn_mower.mower}}
+
+# Tell me when it gets stuck
+- alias: Mower needs help
+  trigger: {platform: state, entity_id: binary_sensor.mower_problem, to: "on"}
+  action:
+    action: notify.mobile_app_phone
+    data: {message: "Mower: {{ states('sensor.mower_state') }}"}
+
+# Program the schedule
+- action: cloudhawk.set_schedule
+  data:
+    device_id: !input mower
+    monday: [{start: "09:00", end: "12:00"}, {start: "15:00", end: "18:00"}]
+    saturday: [{start: "10:00", end: "12:00"}]
 ```
 
-#### Control Card
-```yaml
-type: horizontal-stack
-cards:
-  - type: button
-    tap_action:
-      action: call-service
-      service: button.press
-      target:
-        entity_id: button.cloudhawk_mower_start_mowing
-    icon: mdi:play
-    name: Mow Now
-  - type: button
-    tap_action:
-      action: call-service
-      service: button.press
-      target:
-        entity_id: button.cloudhawk_mower_stop_mowing
-    icon: mdi:stop
-    name: Stop
-  - type: button
-    tap_action:
-      action: call-service
-      service: button.press
-      target:
-        entity_id: button.cloudhawk_mower_return_to_dock
-    icon: mdi:home
-    name: Dock
-```
+More in [example_automations.yaml](example_automations.yaml) and [example_dashboard.yaml](example_dashboard.yaml).
 
-### Automations
-
-#### Start Mowing on Schedule
-```yaml
-automation:
-  - alias: "Start Mowing Weekdays"
-    trigger:
-      platform: time
-      at: "09:00:00"
-    condition:
-      condition: time
-      weekday:
-        - mon
-        - tue
-        - wed
-        - thu
-        - fri
-    action:
-      service: button.press
-      target:
-        entity_id: button.cloudhawk_mower_start_mowing
-```
-
-#### Stop on Low Battery
-```yaml
-automation:
-  - alias: "Stop Mowing on Low Battery"
-    trigger:
-      platform: numeric_state
-      entity_id: sensor.cloudhawk_mower_battery_level
-      below: 20
-    action:
-      service: button.press
-      target:
-        entity_id: button.cloudhawk_mower_return_to_dock
-```
-
-#### Alert on Faults
-```yaml
-automation:
-  - alias: "Mower Fault Alert"
-    trigger:
-      platform: state
-      entity_id: sensor.cloudhawk_mower_fault_records
-    condition:
-      condition: template
-      value_template: "{{ trigger.to_state.state | int > trigger.from_state.state | int }}"
-    action:
-      service: notify.mobile_app_your_phone
-      data:
-        title: "Mower Fault"
-        message: "CloudHawk mower has {{ trigger.to_state.state }} fault records"
-```
-
-## Services
-
-The integration provides services that can be called from automations or scripts:
-
-- `cloudhawk.start` - Start regular mowing
-- `cloudhawk.start_once` - Start single mowing session  
-- `cloudhawk.stop` - Stop mowing
-- `cloudhawk.dock` - Return to dock
-
-Example service call:
-```yaml
-service: cloudhawk.start_once
-target:
-  device_id: your_device_id
-```
-
-## Troubleshooting
-
-### Connection Issues
-
-1. **Mower not discovered**: Ensure Bluetooth is enabled
-2. **Connection timeout**: Move Home Assistant closer to the mower
-3. **Intermittent disconnections**: Check Bluetooth interference from other devices
-
-### Debugging
-
-Enable debug logging by adding to `configuration.yaml`:
+## Debugging
 
 ```yaml
 logger:
-  default: info
   logs:
     custom_components.cloudhawk: debug
 ```
 
-### Common Issues
+Debug level logs every frame sent and received (`tx 55aa…` / `rx 83 …`).
 
-- **"Cannot connect"**: Mower may be off or out of range
-- **Sensors showing "Unknown"**: Connection may be unstable, check distance
-- **Commands not working**: Ensure mower is powered on and within range
+## Development
 
-## Technical Details
+```
+pip install -r requirements_test.txt
+pytest
+```
 
-### Protocol
-- Uses Bluetooth Low Energy (BLE)
-- Custom protocol with `55AA` header
-- Service UUID: `0000ff12-0000-1000-8000-00805f9b34fb`
-- Write UUID: `0000ff01-0000-1000-8000-00805f9b34fb`
-- Notify UUID: `0000ff02-0000-1000-8000-00805f9b34fb`
-
-### Update Frequency
-- Real-time data updates via BLE notifications (no polling)
-- Commands trigger immediate data refresh
-- Background connection maintenance
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+`tests/test_protocol.py` checks the parser against frames captured from a real MB400.
+`custom_components/cloudhawk/protocol.py` is pure Python with no HA dependency and can be reused standalone.
 
 ## Disclaimer
 
-This is an unofficial integration created through reverse engineering. Use at your own risk. The developers are not affiliated with CloudHawk.
-
-## Support
-
-- [Issues](https://github.com/your-username/cloudhawk-homeassistant/issues)
-- [Discussions](https://github.com/your-username/cloudhawk-homeassistant/discussions)
-- [Home Assistant Community](https://community.home-assistant.io/)
+Unofficial, reverse-engineered from the CloudHawk Android app and a live mower. Not affiliated with CloudHawk.
+MIT licence.

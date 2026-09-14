@@ -1,33 +1,282 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "user": {
         "title": "CloudHawk Lawn Mower",
-        "description": "Enter your mower's Bluetooth address",
+        "description": "Select the mower to add.",
         "data": {
-          "address": "Bluetooth Address (MAC)",
-          "name": "Device Name (e.g., RoboMower)"
+          "address": "Mower",
+          "name": "Name"
         }
       },
       "bluetooth_confirm": {
         "title": "CloudHawk Lawn Mower",
-        "description": "Confirm setup of {name}"
+        "description": "Set up {name}?",
+        "data": {
+          "name": "Name"
+        }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to the mower. Make sure it's powered on and within Bluetooth range.",
-      "unknown": "An unexpected error occurred. Please try again."
+      "cannot_connect": "Could not connect to the mower. Make sure it is powered on and in range of a Bluetooth adapter or proxy."
     },
     "abort": {
-      "already_configured": "This mower is already configured."
+      "already_configured": "This mower is already configured.",
+      "no_devices_found": "No CloudHawk mowers found. Make sure the mower is on and in Bluetooth range.",
+      "cannot_connect": "Could not connect to the mower."
     }
   },
-  "options": {
-    "step": {
-      "init": {
-        "title": "CloudHawk Options",
-        "data": {
-          "scan_interval": "Update interval (seconds)"
+  "entity": {
+    "sensor": {
+      "battery_level": {
+        "name": "Battery"
+      },
+      "voltage": {
+        "name": "Battery voltage"
+      },
+      "current": {
+        "name": "Battery current"
+      },
+      "battery_status": {
+        "name": "Battery status",
+        "state": {
+          "normal": "Normal",
+          "low": "Low",
+          "under_voltage": "Under voltage",
+          "full": "Full",
+          "overcharged": "Overcharged"
+        }
+      },
+      "state": {
+        "name": "State",
+        "state": {
+          "running": "Running",
+          "returning_home": "Returning home",
+          "outside_boundary": "Outside boundary",
+          "no_signal": "No boundary signal",
+          "lifted": "Lifted",
+          "tilted": "Tilted",
+          "stuck": "Stuck",
+          "low_battery": "Low battery",
+          "waiting": "Waiting",
+          "spare_time": "Spare time",
+          "close_cover": "Close cover",
+          "charging": "Charging",
+          "cutting": "Cutting",
+          "trapped": "Trapped",
+          "standby": "Standby",
+          "manual_operation": "Manual operation required",
+          "turned_over": "Turned over",
+          "m1_brake": "M1 brake",
+          "m2_brake": "M2 brake",
+          "high_temperature": "High temperature",
+          "instant_mowing": "Instant mowing",
+          "pause_mode": "Pause mowing mode"
+        }
+      },
+      "error": {
+        "name": "Error",
+        "state": {
+          "none": "None",
+          "low_battery": "Low battery",
+          "no_signal": "No signal",
+          "outside_boundary": "Outside boundary",
+          "stuck": "Stuck",
+          "tilted": "Tilted",
+          "lifted": "Lifted",
+          "m1_brake": "M1 brake",
+          "m2_brake": "M2 brake",
+          "turned_over": "Turned over",
+          "error1": "ERROR1",
+          "error20l": "ERROR20L",
+          "error21": "ERROR21",
+          "error22": "ERROR22",
+          "error23": "ERROR23",
+          "error24": "ERROR24",
+          "error3": "ERROR3",
+          "error4": "ERROR4",
+          "trapped": "Trapped",
+          "error20m": "ERROR20M",
+          "i2c_error": "I2C error",
+          "error20r": "ERROR20R"
+        }
+      },
+      "boundary_signal": {
+        "name": "Boundary signal"
+      },
+      "total_work_time": {
+        "name": "Total work time"
+      },
+      "charge_time": {
+        "name": "Charge time"
+      },
+      "fault_count": {
+        "name": "Fault count"
+      },
+      "last_fault": {
+        "name": "Last fault"
+      },
+      "last_cut": {
+        "name": "Last cut"
+      },
+      "last_charge": {
+        "name": "Last charge"
+      },
+      "mower_clock": {
+        "name": "Mower clock"
+      },
+      "last_heartbeat": {
+        "name": "Last heartbeat"
+      },
+      "firmware_version": {
+        "name": "Firmware version"
+      },
+      "serial_number": {
+        "name": "Serial number"
+      }
+    },
+    "binary_sensor": {
+      "charging": {
+        "name": "Charging"
+      },
+      "blade": {
+        "name": "Blade"
+      },
+      "cover": {
+        "name": "Cover"
+      },
+      "working": {
+        "name": "Working"
+      },
+      "problem": {
+        "name": "Problem"
+      },
+      "connected": {
+        "name": "Connected"
+      }
+    },
+    "switch": {
+      "trimming": {
+        "name": "Boundary trimming"
+      },
+      "ultrasonic": {
+        "name": "Ultrasonic sensor"
+      },
+      "rain_sensor": {
+        "name": "Rain sensor"
+      },
+      "mowing_time_mode": {
+        "name": "Mowing time mode"
+      }
+    },
+    "select": {
+      "boundary_signal": {
+        "name": "Boundary signal"
+      }
+    },
+    "number": {
+      "ultrasonic_distance": {
+        "name": "Ultrasonic distance"
+      },
+      "rain_delay": {
+        "name": "Rain delay"
+      },
+      "cut_width": {
+        "name": "Cut width"
+      }
+    },
+    "button": {
+      "start": {
+        "name": "Start mowing"
+      },
+      "start_once": {
+        "name": "Mow once"
+      },
+      "spiral_cut": {
+        "name": "Spiral cut"
+      },
+      "edge_cut": {
+        "name": "Edge cut"
+      },
+      "stop": {
+        "name": "Stop"
+      },
+      "dock": {
+        "name": "Return to dock"
+      },
+      "sync_clock": {
+        "name": "Sync clock"
+      },
+      "refresh": {
+        "name": "Refresh"
+      }
+    }
+  },
+  "services": {
+    "set_schedule": {
+      "name": "Set schedule",
+      "description": "Program the mowing time schedule. Days not given are left unchanged; each day takes up to two start/end periods.",
+      "fields": {
+        "device_id": {
+          "name": "Mower",
+          "description": "The mower to program."
+        },
+        "monday": {
+          "name": "Monday",
+          "description": "List of periods, e.g. [{\"start\": \"09:00\", \"end\": \"12:00\"}]."
+        },
+        "tuesday": {
+          "name": "Tuesday",
+          "description": "List of periods, e.g. [{\"start\": \"09:00\", \"end\": \"12:00\"}]."
+        },
+        "wednesday": {
+          "name": "Wednesday",
+          "description": "List of periods, e.g. [{\"start\": \"09:00\", \"end\": \"12:00\"}]."
+        },
+        "thursday": {
+          "name": "Thursday",
+          "description": "List of periods, e.g. [{\"start\": \"09:00\", \"end\": \"12:00\"}]."
+        },
+        "friday": {
+          "name": "Friday",
+          "description": "List of periods, e.g. [{\"start\": \"09:00\", \"end\": \"12:00\"}]."
+        },
+        "saturday": {
+          "name": "Saturday",
+          "description": "List of periods, e.g. [{\"start\": \"09:00\", \"end\": \"12:00\"}]."
+        },
+        "sunday": {
+          "name": "Sunday",
+          "description": "List of periods, e.g. [{\"start\": \"09:00\", \"end\": \"12:00\"}]."
+        }
+      }
+    },
+    "set_cut_days": {
+      "name": "Set cut days",
+      "description": "Choose which days of the week the mower is allowed to cut.",
+      "fields": {
+        "device_id": {
+          "name": "Mower",
+          "description": "The mower to program."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days on which mowing is enabled."
+        }
+      }
+    },
+    "set_pin": {
+      "name": "Set PIN",
+      "description": "Change the mower's 4-digit keypad PIN.",
+      "fields": {
+        "device_id": {
+          "name": "Mower",
+          "description": "The mower to program."
+        },
+        "pin": {
+          "name": "PIN",
+          "description": "New 4-digit PIN."
         }
       }
     }
