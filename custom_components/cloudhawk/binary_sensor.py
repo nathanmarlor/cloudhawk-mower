@@ -30,14 +30,19 @@ BINARY_SENSORS: tuple[CloudHawkBinaryDescription, ...] = (
         device_class=BinarySensorDeviceClass.BATTERY_CHARGING,
         value_fn=lambda d: d.charging,
     ),
+    # blade/cover/work notifications (0x88/0x8a/0x87) are never emitted by MB400
+    # firmware RM V6.01 - confirmed absent across a full mow+dock cycle - so these
+    # stay unknown here. Disabled by default; enable if your model does send them.
     CloudHawkBinaryDescription(
         key="blade",
         device_class=BinarySensorDeviceClass.RUNNING,
+        entity_registry_enabled_default=False,
         value_fn=lambda d: d.blade_running,
     ),
     CloudHawkBinaryDescription(
         key="cover",
         device_class=BinarySensorDeviceClass.OPENING,
+        entity_registry_enabled_default=False,
         value_fn=lambda d: d.cover_open,
     ),
     CloudHawkBinaryDescription(

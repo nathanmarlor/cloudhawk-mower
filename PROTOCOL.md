@@ -181,3 +181,21 @@ After service discovery and enabling notify on `ff02`, the dashboard sends (spac
 55AA04 8033 00 05 BB          → rain delay 5
 55AA06 8004 01 02 03 04 93    → set PIN 1234
 ```
+
+## Live capture: full mow + dock cycle (2026-09-14, camera-correlated)
+
+Watched an MB400 do a "mow once" session and return to dock while reading BLE, with a camera for ground truth.
+
+- **State sequence** (unsolicited `81` pushes): `38` instant-mowing → `01` returning home → `0b` charging.
+  With a normal `05` start the cutting state would be `0c` instead of `38`.
+- **Battery decodes correctly in motion and on charge.** Mowing: `charging=0, ~18.8 V, 60-63 %, 0.0 A`. On docking
+  the charging flag flips to `1` immediately, then within one push the current field jumps to `0f` = **1.5 A** and
+  the level climbs 63 → 78 %+ as voltage recovers 18.8 → 19.5 V. The current byte (`÷10` A) is 0 except while charging.
+- **`87` work / `88` blade / `8a` cover never fired** across the whole cycle — confirmed absent on this firmware.
+- **Live analog fields** `2f` (byte 7) and `10` (byte 15) vary as the mower moves (`2f` byte 7 ranged ~178-243),
+  consistent with a boundary-wire signal reading, but do not map cleanly to distance-from-wire from one camera —
+  left undecoded.
+- **`59`** was `0xdb` throughout mowing *and* charging; it read `0x00` only on the earlier fully-charged idle
+  capture. So it is **not** an "out of dock" flag — more like a busy / not-fully-charged token. Unconfirmed until
+  a 100 % idle reading is seen again.
+
